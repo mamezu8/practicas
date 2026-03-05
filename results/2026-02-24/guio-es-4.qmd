@@ -127,6 +127,7 @@ library('curl')
 Intenta ejecutar los bloques siguientes. Compáralos y explica qué problemas o
 dificultades identificas en cada uno.
 
+El primero no funciona, pero el segundo sí porque tiene la fucnión URLencode. El tercero también funciona. 
 
 ```{r}
 curl_download('https://www.ebi.ac.uk/ena/portal/api/search?result=assembly&query=tax_tree(6157) AND genome_representation="full"&fields=version,tax_id,scientific_name,last_updated,base_count&limit=0',
@@ -157,11 +158,21 @@ Confecciona una URL para descargar una tabla de las secuencias codificantes de
 alcohol deshidrogenasas del género *Drosophila*, que te permita contestar las
 preguntas siguientes. Consulta el apéndice de este guión, si lo necesitas.
 
-1. ¿Cuántas secuencias hay con el término "alcohol dehydrogenase" en su descripción?
-2. ¿Qué longitudes tienen? 
-3. ¿De cuántas especies diferentes son estas secuencias?
-4. ¿Cuándo se publicaron las más recientes?
+1. ¿Cuántas secuencias hay con el término "alcohol dehydrogenase" en su descripción? 1258
+2. ¿Qué longitudes tienen?  Min. 1st Qu.  Median    Mean 3rd Qu.    Max. 
+                             44     590     839    1252     967   17499 
+3. ¿De cuántas especies diferentes son estas secuencias? 308
+4. ¿Cuándo se publicaron las más recientes? "2022-04-03"
 :::
+
+```{r}
+result <- 'result=sequence&'
+query  <- 'query=tax_tree(7215) AND description="alcohol dehydrogenase"&'
+fields <- 'fields=tax_id,scientific_name,description,last_updated,base_count,first_public&'
+limit  <- 'limit=0'
+URL <- paste0(portal, result, query, fields, limit)
+curl_download(URLencode(URL), destfile = 'z2.txt')
+```
 
 # Trabajar con los resultados
 La función `read.table()` de R nos permite leer un archivo (o una URL) para crear
