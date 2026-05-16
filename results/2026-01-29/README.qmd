@@ -6,7 +6,7 @@ execute:
   output: true
   error: true
 engine: knitr
-bibliography: ../../references.bib
+bibliography: ../../doc/references.bib
 language:
    title-block-published: "Última actualización:"
    section-title-references: "Bibliografía"
@@ -137,10 +137,56 @@ fi
 1. Si al ejecutarlas aparece algún mensaje de error, léelo y corrige el error.
 2. Lee la ayuda del programa `needle` e intenta ajustar los parámetros
    para obtener un alineamiento más convincente.
+```{bash}
+needle -asequence HumanChr17.fa \
+       -bsequence HumanSMARCD2.fa \
+       -gapopen 30 \
+       -gapextend 0.1 \
+       -auto \
+       -outfile aln1_mejorado.txt
+```
+
 3. Prueba el programa `water`, para que el alineamiento sea local.
+```{bash}
+water -asequence HumanChr17.fa \
+      -bsequence HumanSMARCD2.fa \
+      -gapopen 10 \
+      -gapextend 0.5 \
+      -auto \
+      -outfile aln_water.txt
+```
+
 4. Intenta guardar el alineamiento en formato FASTA.
+```{bash}
+needle -asequence HumanChr17.fa \
+       -bsequence HumanSMARCD2.fa \
+       -gapopen 15 \
+       -gapextend 0.5 \
+       -aformat3 fasta \
+       -auto \
+       -outfile aln1.fasta
+```
+
 5. Alinea también el tránscrito de SMARCD2 de chimpancé a su cromosoma.
+```{bash}
+wget -O ChimpSMARCD2.fa https://www.ebi.ac.uk/ena/browser/api/fasta/PNJ01291.1
+wget -O ChimpChr17.fa "https://rest.ensembl.org/sequence/region/chimpanzee/17:63309800..63321000:1?content-type=text/x-fasta"
+```
+
+```{bash}
+exonerate --model est2genome ChimpSMARCD2.fa ChimpChr17.fa > chimp_exonerate.txt
+```
+
 6. Alinea también los dos fragmentos cromosómicos.
+```{bash}
+needle -asequence HumanChr17.fa \
+       -bsequence ChimpChr17.fa \
+       -gapopen 10 \
+       -gapextend 0.5 \
+       -auto \
+       -outfile human_chimp_chr17.txt
+```
+
 :::
 
 Para alinear tránscritos o incluso proteínas a un genoma de referencia, es mejor
@@ -172,6 +218,9 @@ no hemos condicionado la ejecución.
 :::{.callout-note icon=false}
 ## Desafío
 ¿Cómo puedes enviar el resultado de `exonerate` a un archivo?
+```{bash}
+exonerate --model est2genome HumanSMARCD2.fa HumanChr17.fa > exonerate_human.txt
+```
 :::
 
 # Apéndice. Alineamientos múltiples
