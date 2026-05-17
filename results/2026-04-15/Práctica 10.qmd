@@ -1,0 +1,181 @@
+---
+title: "Práctica 10. Ensamblaje de genomas"
+format: html
+editor: visual
+engine: knitr
+---
+
+La práctica se completó utilizando un ordenador alternativo, ya que no fue posible ejecutar hifiasm en mi equipo personal (macOS). Aunque el código fuente está disponible y la instalación y compilación indicadas en la guía, en mi sistema, no se pudo compilar correctamente el ejecutable siguiendo esos pasos.
+
+Por este motivo, el análisis y la obtención de resultados se realizaron en el ordenador de una compañera, donde sí fue posible instalar y ejecutar hifiasm en el entorno requerido. En este informe se documentan los comandos que deberían haberse ejecutado y los resultados obtenidos a partir de esa ejecución.
+
+Objetivo
+
+Ensamblar el genoma de un eucariota diploide con lecturas de PacBio de alta fidelidad.
+
+Preparación
+
+Hifiasm
+
+El programa hifiasm no está instalado en los ordenadores virtuales, y por tanto es necesario hacerlo manualmente, siguiendo los pasos siguientes en el terminal de Bash. Lo recomendable es instalarlo en una carpeta bin dentro de la carpeta de usuaria.
+
+```{bash}
+#| eval: false
+if [ ! -d ~/bin ]; then mkdir ~/bin; fi
+cd ~/bin
+git clone https://github.com/chhylp123/hifiasm
+cd hifiasm
+make
+```
+
+Una vez compilado, el ejecutable \~/bin/hifiasm/hifiasm estará disponible, pero no en el PATH (donde Bash pueda encontrarlo). Para que hifiasm esté en el PATH, podemos añadir la carpeta \~/bin/hifiasm al PATH. En el terminal de Bash esto se consigue con la orden export PATH=\$PATH:\~/bin/hifiasm. Pero esta orden sólo afecta el terminal en el que se ha ejecutado. Para modificar el PATH permanentemente hay que incluir esta orden en el script \~/.bashrc. Puedes hacerlo automáticamente con la orden siguiente, pero asegúrte de ejecutarla sólo una vez:
+
+```{bash}
+echo 'export PATH=$PATH:~/bin/hifiasm' >> ~/.bashrc
+```
+
+A partir de entonces, cada vez que inicies el terminal, hifiasm estará en el PATH. Pero el terminal desde el cual has ejecutado la orden anterior se abrió antes de modificar .bashrc. Para que surta efecto sin tener que cerrar y abrir el terminal, puedes usar la orden . \~/.bashrc.
+
+Hace falta instalar también otro programa, pero empecemos primero la práctica y más adelante
+
+Datos
+
+Vamos a usar lecturas HiFi generadas por Rabanal et al. (2022) de un único individuo de la planta Arabidopsis thaliana, ecotipo Columbia (Col-0), con la tecnología SMRT de PacBio (proyecto PRJEB50694). Los datos seleccionados son solo una parte de los originales y se encuentran en el archivo At4.10.fa.gz (46 Mb), disponible en el aula virtual. También está en el espacio de disco compartido de la Universidad de Valencia, dentro del grupo de bioinformática. Este espacio es directamente accesible desde los ordenadores virtuales.
+
+En adelante supondré que el archivo está guardado en la carpeta data y que su path relativo es ../../data/At4.10.fa.gz.
+
+Revisión de los datos
+
+Los datos están en formato FASTA porque contienen sólo lecturas de alta calidad, y hifiasm no utiliza la información de las calidades de cada base. El archivo está comprimido. Antes de empezar el ensamblaje deberíamos tener una idea de la cantidad de datos que tenemos. Si lo necesitas, utiliza una inteligencia artificial para responder las preguntas siguientes y anota en un bloque de código las órdenes utilizadas. Puedes hacerlo con instrucciones de Bash o de R, pero R necesitará cargar en memoria el archivo entero, lo que no sería muy práctico si se tratara de un archivo 10 o 50 veces mayor.
+
+#Ejercicio 1
+
+```{bash}
+# Contar el número de secuencias (líneas que empiezan por ">")
+grep -c "^>" ../../data/At4.10.fa
+
+# Ver todos los encabezados de las secuencias
+grep "^>" ../../data/At4.10.fa
+
+# Calcular la longitud de cada secuencia y obtener estadísticas
+awk '/^>/ {
+    if (seqlen > 0) print seqlen
+    seqlen = 0
+    next
+}
+{
+    seqlen += length($0)
+}
+END {
+    print seqlen
+}' ../../data/At4.10.fa | sort -n | awk '
+BEGIN { min=""; max=""; sum=0; count=0 }
+{
+    if (min=="" || $1<min) min=$1
+    if (max=="" || $1>max) max=$1
+    sum += $1
+    count++
+}
+END {
+    printf "Min: %d\nMedia: %.2f\nMax: %d\nTotal bases: %d\n", min, sum/count, max, sum
+}'
+```
+
+¿Cuántas secuencias contiene el archivo? El archivo contiene 13.812 secuencias (lecturas PacBio CCS).
+
+¿Qué longitudes mínima, media y máxima tienen las secuencias? Estadístico Valor Mínima 2.942 bp Media 18.143,61 bp Máxima 59.075 bp
+
+¿Cuál es el número total de bases? El total es 250.599.484 bp (\~250,6 Mb).
+
+Si se estimara que el genoma a ensamblar fuera de sólo 19 millones de bases, ¿cuál sería la cobertura esperada? La cobertura se calcula con la fórmula de Lander-Waterman:
+
+C = N × L / G
+
+Donde N es el número de lecturas, L es la longitud media y G es el tamaño del genoma. En este caso equivale a dividir el total de bases entre el tamaño del genoma: C = 250.599.484 / 19.000.000 ≈ 13,19× Es decir, se esperaría una cobertura de aproximadamente 13,2x, lo que es una cobertura moderada-buena para el ensamblaje con lecturas largas de PacBio.
+
+Ensamblaje
+
+El programa hifiasm produce varios archivos de salida. Para tener la carpeta de trabajo ordenada, es recomendable crear un subcarpeta donde poder guardarlos. Si fuéramos a probar más de una estrategia de ensamblado, guardaríamos los resultados de cada intento en una carpeta diferente, que podríamos nombrar asm1, asm2, etc. Aunque sólo realicemos un ensamblaje, crearemos la carpeta asm1 para guardar los resultados en ella.
+
+```{bash}
+# Con la ejecución condicional nos ahorramos algún mensaje de error:
+if [ ! -d asm1 ]; then mkdir asm1; fi
+```
+
+El ensamblaje de estas lecturas puede durar unos minutos. No queremos tener que ejecutarlo cada vez que compilamos el documento de Quarto. Tenemos dos opciones: o bien usamos la directriz #\| cache: true al principio del bloque de código o bien controlamos directamente la ejecución condicional con Bash. Si usamos el método que ofrece Quarto, aparecerá una nueva carpeta que guarda resultados previos y que estaría bien incluir en el repositorio de Git. Yo prefiero usar Bash:
+
+```{bash}
+#| eval: false
+export PATH="$PATH:$HOME/bin/hifiasm"
+if [ ! -e asm1/At4.bp.p_ctg.gfa ]; then
+   hifiasm -o asm1/At4 -t 2 -f 0 ../../data/At4.10.fa.gz 2> asm1/hifiasm.log
+fi
+```
+
+Las opciones significan lo siguiente:
+
+-o asm1/At4: usa el prefijo asm1/At4 para los archivos de salida. -t 2: usa dos procesadores. Por defecto usaría uno. -f 0: inhabilita el uso de un filtro de Bloom (Melsted and Pritchard 2011) durante la corrección de errores, que ocuparía 16 Gb de memoria. ../../data/At4.10.fa.gz: archivo con los datos de partida. 2\> asm1/hifiasm.log: guarda los numerosos mensajes que hifiasm envía al error estándar en un archivo asm1/hifiasm.log. Esto evita que esos mensajes se acumulen en el informe HTML.
+
+#Ejercicio 2 Consulta la ayuda de hifiasm (hifiasm -h) y contesta las preguntas siguientes:
+
+¿Los parámetros corresponden al ensamblaje de un genoma haploide o diploide? Los parámetros usados corresponden a un ensamblaje haploide. Cuando no se especifica ninguna opción de purgado de haplotipos ni se proporcionan datos de Hi-C o de un segundo haplotipo, hifiasm ensambla por defecto en modo haploide, generando el archivo bp.p_ctg.gfa (primary contigs).
+
+¿Qué nivel de eliminación de duplicaciones hemos aplicado? (El paso de eliminar duplicaciones sirve para que las zonas de alta heterocigosidad no sean ensambladas como contigs diferentes). Se ha usado -f 0, lo que deshabilita el filtro de Bloom. Este filtro se usa normalmente en el paso de corrección de errores para eliminar k-mers poco frecuentes (errores de secuenciación). Al desactivarlo con -f 0 se ahorra memoria (evita usar \~16 GB), a costa de que la corrección inicial sea algo menos eficiente. No se ha aplicado ningún nivel adicional de purga de duplicaciones (como purge_dups).
+
+Si tuvieramos lecturas ultra-largas, ¿con qué opción o argumento añadiríamos esa información? Con la opción --ul, seguida de la ruta al archivo de lecturas ultra-largas. Por ejemplo:
+
+```{bash}
+#| eval: false
+bashhifiasm -o asm1/At4 -t 2 -f 0 --ul ../../data/ont_reads.fa.gz ../../data/At4.10.fa.gz 2> asm1/hifiasm.log
+```
+
+Esta opción permite incorporar lecturas Oxford Nanopore (ultra-largas) para mejorar el ensamblaje, especialmente en regiones repetitivas.
+
+Evaluación del resultado
+
+#Ejercicio 3 Consulta la descripción de los archivos de salida que encontrarás en este enlace y contesta las preguntas siguientes:
+
+¿Dónde están las secuencias que componen el ensamblaje? Las secuencias del ensamblaje se encuentran en los archivos .gfa. El archivo principal es prefix.p_ctg.gfa, que contiene el grafo de ensamblaje de los contigs primarios con un ensamblaje completo. Para cada grafo, hifiasm también genera una versión simplificada \*.noseq.gfa sin secuencias, pensada para facilitar la visualización.
+
+En los archivos .gfa, ¿qué son las líneas que empiezan por ‘A’? Las líneas que empiezan por 'A' contienen información sobre las lecturas que se han usado para construir cada contig o unitig. Cada línea A es texto plano separado por tabulaciones, e incluye entre sus campos el estado de haplotipo de cada lectura (HG:A:a, HG:A:p, HG:A:m, que indican si la lectura no es asignable a ningún haplotipo, es específica del padre/hap1 o específica de la madre/hap2, respectivamente).
+
+¿Qué información tiene los archivos .bed? Los archivos .bed (con sufijo lowQ.bed) contienen las coordenadas de las regiones de baja calidad del ensamblaje, escritas en formato BED.
+
+¿Cuál es la cobertura media estimada de las secuencias homocigotas? La cobertura homocigota es el umbral de cobertura de lecturas homocigotas que hifiasm estima automáticamente. Para muestras homocigotas, en el gráfico de k-mers debería aparecer un único pico alrededor de la cobertura de lectura. Readthedocs En nuestro caso, con \~13,2x de cobertura total, ese sería el valor de referencia esperado para el pico homocigoto.
+
+¿Y la de las heterocigotas? Para muestras heterocigotas, el gráfico de k-mers debería mostrar dos picos. El pico más pequeño corresponde a la cobertura de las regiones heterocigotas Readthedocs, que típicamente se sitúa alrededor de la mitad del valor homocigoto, ya que las variantes heterocigotas aparecen solo en uno de los dos haplotipos. En nuestro caso sería aproximadamente \~6-7x.
+
+Los ensamblajes primario y por haplotipos se presentan en formato GFA. Para extraer las secuencias en formato FASTA podemos usar el pequeño script siguiente, en lenguaje AWK, desde el terminal de Bash:
+
+```{bash}
+#| eval: false
+awk '(/^S/){print ">" $2 "\n" $3}' asm1/At4.bp.p_ctg.gfa > asm1/At4.fa
+```
+
+Calidad del ensamblaje
+
+Para obtener las estadísticas del ensamblaje utilizaremos el programa compleasm (Huang and Li 2023), que no está instalado en el ordenador virtual. Está programado en Python y depende del módulo pandas de Python. En WSL, este módulo o paquete probablemente pueda instalarse con apt install python3-pandas. Alternativamente, en los sistemas con conda podéis hacer conda install pandas. En el ordenador virtual, el módulo pandas ya está disponible.
+
+```{bash}
+cd ~/bin
+wget https://github.com/huangnengCSU/compleasm/releases/download/v0.2.7/compleasm-0.2.7_x64-linux.tar.bz2
+tar -jxvf compleasm-0.2.7_x64-linux.tar.bz2
+```
+
+En adelante supondré que compleasm.py está en \~/bin/compleasm_kit. El programa necesita descargar la lista de genes típica del linaje al que pertenece el ensamblaje. En nuestro caso, el linaje es el de las Brassicales. La orden siguiente puede tomar más de 10 minutos.
+
+```{bash}
+#| eval: false
+if [ ! -e asm1_eval/summary.txt ]; then
+   python3 ~/bin/compleasm_kit/compleasm.py run \
+      -t 2 -l brassicales -a asm1/At4.fa -o asm1_eval
+fi
+```
+
+#Ejercicio 4 Consulta la ayuda de compleasm.py y averigua qué significan los argumentos utilizados. Visualización del grafo
+
+Desafortunadamente, no existe todavía ningún paquete de R para visualizar ensamblajes como grafos de fragmentos a partir de archivos .gfa. Uno de los visualizadores más populares es bandage, una aplicación gráfica que puede instalarse fácilmente en cualquier sistema operativo, pero que no ofrece interfaz por línea de comandos.
+
+#Ejercicio 5 Instala bandage, carga el grafo del ensamblaje realizado y genera una figura. Puedes añadir la figura al informe HTML mediante la sitaxis siguiente:
+
+![](figura.png)
